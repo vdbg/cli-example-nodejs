@@ -30,6 +30,14 @@ const prettyjsonOptions = {};
 
 program.version('0.0.1');
 
+if (token == undefined) {
+  console.error('TOKEN NOT DEFINED!!')
+  process.exit(1);
+}
+
+const offCommand = [{command: 'off', capability: 'switch', component: 'main', arguments: []}];
+const onCommand =  [{command: 'on',  capability: 'switch', component: 'main', arguments: []}];
+
 program
   .command('list')
   .description('list all devices')
@@ -45,15 +53,34 @@ program
 
 program
   .command('turnoff [names...]')
-  .description('Turn off switch devices. Specify a specific switch name (use quotes if name contains spaces), or omit to turn off all switches. Multiple devices can be specified (sthelper turnoff "my device 1" "my device 2").')
+  .description('Turn off switch devices. Specify specific switch names (use quotes if they contains spaces), or omit to turn off all switches.')
   .action(function(names) {
     if (names && names.length) {
       names.forEach(function(name) {
-        actuateSwitches([{command: 'off', capability: 'switch', component: 'main', arguments: []}], name);
+        actuateSwitches(offCommand, name);
       })
     } else {
-      actuateSwitches([{command: 'off', capability: 'switch', component: 'main', arguments: []}], null);
+      actuateSwitches(offCommand, null);
     }
+  });
+
+
+program
+  .command('turnoffbyid [Ids...]')
+  .description('Turn off switch devices using their uuids.')
+  .action(function(ids) {
+     ids.forEach(function(id) {
+        actuateWithLogin(id, offCommand);
+      })
+  });
+
+program
+  .command('turnonbyid [Ids...]')
+  .description('Turn on switch devices using their uuids.')
+  .action(function(ids) {
+     ids.forEach(function(id) {
+        actuateWithLogin(id, onCommand);
+      })
   });
 
 program
@@ -68,8 +95,24 @@ program
       console.log('getting status for all...');
       getStatus(null);
     }
-
   });
+
+
+program
+  .command('statusbyid [ids...]')
+  .description('Get the status of the specified devices using their uuids.')
+  .action(function(ids) {
+    ids.forEach(function(name) {
+      getDeviceStatus(name).then(function(status) {
+            console.log(`device status: ${prettyjson.render(status, prettyjsonOptions)}`);
+          })
+          .catch(function(err) {
+            console.error(`Error getting device status for device ${name}`);
+          });
+    });
+  });
+
+
 
 program
   .command('turnon [names...]')
@@ -77,14 +120,8 @@ program
   .option('-l, --level <number>', 'Set the bulb to the specified brightness level.', parseInt)
   .option('-c --color <color>', 'Set the bulb to the specified color. Supported colors are white, blue, green, yellow, orange, purple, pink, and red.')
   .action(function(names, options) {
-    let commands = [
-      {
-        command: 'on',
-        capability: 'switch',
-        component: 'main',
-        arguments: []
-      }
-    ];
+    let commands = [];
+    commands.push(onCommand[0]);
     if (options.level) {
       commands.push({
         command: 'setLevel',
@@ -112,6 +149,12 @@ program
   });
 
 program.parse(process.argv);
+
+// if (program.args.length != 0) {
+//   console.log(program.args);
+//   console.error("Invalid arguments. Note: commands are case sensitive");
+//   process.exit(1);
+// }
 
 /**
  * Gets the status of the specified device, or all devices if name not
@@ -177,6 +220,7 @@ function getDeviceStatus(deviceId) {
       'Authorization': 'Bearer: ' + token
     }
   };
+//  console.log(options)
   return rp(options);
 }
 
@@ -200,37 +244,13 @@ function actuateSwitches(commands, name) {
           return elem.name.toLowerCase() === name.toLowerCase();
         });
         if (device) {
-          actuate(device.id, commands)
-            .then(function(resp) {
-              let cmds = commands.map(function(it) {
-                return `'${it.command}'`;
-              }).join(', ');
-              console.log(`Successfully sent commands ${cmds} to device ${name}`);
-            })
-            .catch(function(err) {
-              let cmds = commands.map(function(it) {
-                return `'${it.command}'`;
-              }).join(', ');
-              console.error(`Error executing commands ${cmds} on switch with ID ${device.id}`);
-            });
+          actuateWithLogin(device.id, commands);
         } else {
           console.error(`No device found with name "${name}"`);
         }
       } else {
         devices.forEach(function(device) {
-          actuate(device.id, commands)
-            .then(function(resp) {
-              let cmds = commands.map(function(it) {
-                return `'${it.command}'`;
-              }).join(', ');
-              console.log(`Successfully executed commands ${cmds} on device ${device.name}`);
-            })
-            .catch(function(err) {
-              let cmds = commands.map(function(it) {
-                return `'${it.command}'`;
-              }).join(', ');
-              console.error(`Error executing commands ${cmds}: ${err}`);
-            })
+          actuateWithLogin(device.id, commands);
         });
       }
     })
@@ -258,8 +278,22 @@ function actuate(switchId, commands) {
     },
     body: commands
   };
+  // console.log(options);
   return rp(options);
 }
+
+function actuateWithLogin(deviceId, commands) {
+  let cmds = commands.map(function (it) { return `'${it.command}'`; }).join(', ');
+  console.log(`Calling Actuate on device ${deviceId}`);
+  actuate(deviceId, commands)
+    .then(function (resp) {
+      console.log(`Successfully sent commands ${cmds} to device ${deviceId}`);
+    })
+    .catch(function (err) {
+      console.error(`Error executing commands ${cmds} on device ${deviceId}: ${err}`);
+    });
+}
+
 
 /**
  * Gets a list of devices.
