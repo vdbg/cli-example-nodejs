@@ -5,6 +5,7 @@ declare -A deviceStatuses
 
 config_file="bt.config"
 stop_file="bt.stop"
+bt_retry=false
 
 [ -f "$config_file" ] || { echo "$config_file file not found."; exit 1; }
 
@@ -15,38 +16,75 @@ stop_file="bt.stop"
 
 export SMARTTHINGS_CLI_TOKEN
 
-probe_bt () {
-  declare uuid_of_device=$3
-  declare mac_of_device=$2
-  declare name_of_device=$1
-
-  echo "Probing device $name_of_device with mac $mac_of_device and uuid $uuid_of_device ..."
-
+probe_one_other_method () {
   cmdout=$(hcitool cc $mac_of_device \
            && hcitool auth $mac_of_device \
            && hcitool rssi $mac_of_device \
            && hcitool dc $mac_of_device )
 
-  echo "Output: $cmdout"
+  echo "$name_of_device: Output: $cmdout"
 
   btcurrent=-1
   btcurrent=$(echo $cmdout | grep -c "RSSI return value") 2> /dev/null
   rssi=$(echo $cmdout | sed -e 's/RSSI return value: //g')
 
   if [ $btcurrent = 1 ]; then
-    echo "Device connected with RSSI: $rssi"
+    echo "$name_of_device: Device connected with RSSI: $rssi"
     btcurrent="turnonbyid"
   else
-    echo "Device not connected!"
+    echo "$name_of_device: Device not connected!"
     btcurrent="turnoffbyid"
   fi
+}
+
+probe_one () {
+  cmdout=$(l2ping -c 1 $mac_of_device)
+
+  echo "$name_of_device: Output: $cmdout"
+
+  btcurrent=-1
+  btcurrent=$(echo $cmdout | grep -c "1 received") 2> /dev/null
+
+  if [ $btcurrent = 1 ]; then
+    echo "$name_of_device: Device connected"
+    btcurrent="turnonbyid"
+  else
+    echo "$name_of_device: Device not connected!"
+    btcurrent="turnoffbyid"
+  fi
+}
+
+probe_bt () {
+  declare uuid_of_device=$3
+  declare mac_of_device=$2
+  declare name_of_device=$1
+
+  echo "$name_of_device: Probing device with mac $mac_of_device and uuid $uuid_of_device ..."
+
+  probe_one
 
   if [ "${deviceStatuses[$uuid_of_device]}" != "$btcurrent" ]; then
-    echo "Updating smarthome status..."
-    echo sthelper $btcurrent $uuid_of_device
-    sthelper $btcurrent $uuid_of_device
-    if [ $? = 0 ]; then
-      deviceStatuses[$uuid_of_device]=$btcurrent 
+
+    echo "$name_of_device: Status changed to $btcurrent"
+
+    btold=$btcurrent
+
+    if [ "$bt_retry" = "true" ]; then 
+      echo "Retry enabled; calling again to be sure"
+      btcurrent=-1
+      sleep 30s
+
+      probe_one
+    fi
+
+    if [ "$btold" = "$btcurrent" ]; then
+      echo "$name_of_device: Updating status to $btcurrent ..."
+      sthelper $btcurrent $uuid_of_device
+      if [ $? = 0 ]; then
+        deviceStatuses[$uuid_of_device]=$btcurrent 
+      fi
+    else
+      echo "$name_of_device: status change not confirmed; changed to $btcurrent"
     fi
   fi
 }
