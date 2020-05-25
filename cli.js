@@ -112,7 +112,19 @@ program
     });
   });
 
-
+program
+  .command('statusvaluebyid [ids...]')
+  .description('Get the value of the status of the specified switches using their uuids.')
+  .action(function(ids) {
+    ids.forEach(function(name) {
+      getDeviceStatus(name).then(function(status) {
+            console.log(`${status.components.main.switch.switch.value}`);
+          })
+          .catch(function(err) {
+            console.error(`Error getting device status for device ${name}`);
+          });
+    });
+  });
 
 program
   .command('turnon [names...]')
